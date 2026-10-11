@@ -29,8 +29,8 @@ DOMAIN = os.environ.get("DW_EMAIL_DOMAIN", "example.com")
 
 # Illustrative centre point; the incidents sit a few hundred metres around it.
 CENTER = (
-    float(os.environ.get("DW_DEMO_LAT", "12.9716")),
-    float(os.environ.get("DW_DEMO_LNG", "77.5946")),
+    float(os.environ.get("DW_DEMO_LAT", "28.6139")),
+    float(os.environ.get("DW_DEMO_LNG", "77.2090")),
 )
 
 # slug, type, landmark, description, (dlat, dlng), triage, assign_reason

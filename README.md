@@ -57,6 +57,39 @@ Status: the backend is deployed and smoke-tested. The web frontend
 
 All in `ap-south-1` (Mumbai), defined in `infrastructure/template.yaml` (AWS SAM).
 
+```mermaid
+flowchart LR
+    subgraph users["Browser"]
+        reporter["Reporter<br/>(phone, QR poster)"]
+        operator["Operator"]
+        worker["Field worker"]
+    end
+
+    amplify["Amplify Hosting<br/>static Next.js"]
+    cognito["Cognito<br/>SRP login, ID token"]
+    apigw["API Gateway HTTP API<br/>JWT authorizer, throttling"]
+    lambda["Lambda<br/>FastAPI"]
+    ddb[("DynamoDB<br/>incidents + audit events<br/>in one transaction")]
+    s3[("S3<br/>private evidence")]
+    cw["CloudWatch<br/>logs, 2 alarms"]
+    sns["SNS<br/>email"]
+    budget["AWS Budgets<br/>$5 alert"]
+
+    users -->|"load app"| amplify
+    users -->|"sign in"| cognito
+    users -->|"API calls + Bearer token"| apigw
+    apigw --> lambda
+    lambda --> ddb
+    lambda -->|"presign URLs"| s3
+    users -->|"presigned POST / GET"| s3
+    lambda --> cw
+    cw -->|"alarm"| sns
+```
+
+The browser uploads and downloads photos straight from S3 with presigned
+URLs, so photo bytes never pass through Lambda. The budget alert is set up
+outside the SAM template.
+
 | Service | What it does | Why |
 |---|---|---|
 | AWS Amplify Hosting | Serves the static Next.js export over HTTPS | No server to run; manual zip deploys, no CI needed |
@@ -201,8 +234,8 @@ real reports or real users.
     the queue shows a mix of statuses.
   - The descriptions and landmarks are invented.
   - The coordinates are made-up offsets of a few hundred metres around an
-    illustrative centre point, by default `12.9716, 77.5946` (central
-    Bengaluru). This is not a real campus layout. Override the centre with
+    illustrative centre point, by default `28.6139, 77.2090` (central
+    New Delhi). This is not a real campus layout. Override the centre with
     `DW_DEMO_LAT` and `DW_DEMO_LNG`.
 - **Smoke test incidents.** `scripts/smoke.sh` also files test incidents while
   it runs.
