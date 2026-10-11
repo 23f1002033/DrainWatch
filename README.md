@@ -1,9 +1,22 @@
 # DrainWatch Ops
 
-Incident tracking for waterlogging and blocked drains on a campus, from the
-first report to a verified closure.
+Scan a QR poster to report a flooded path or blocked drain; the facility team
+tracks it to a verified fix, with every step on an audit trail.
+
+[Live app](https://main.d2m9rrzhq9d5qo.amplifyapp.com) |
+[Demo video](VIDEO_URL) |
+[Architecture](#architecture) |
+[Cost](#cost) |
+[Teardown](#tear-down)
 
 Built for the WeMakeDevs x AWS Environmental Hacks (Heat and Water track).
+
+| Operator queue | Incident detail (field worker) | Report form (phone) |
+|---|---|---|
+| <img src="docs/screenshots/queue.png" alt="Operator queue with quick views, severity badges and overdue flags" height="240"> | <img src="docs/screenshots/incident.png" alt="Incident detail with actions and audit timeline" height="240"> | <img src="docs/screenshots/report-mobile.png" alt="Public report form on a phone" height="240"> |
+
+**Verified:** 344 backend tests and 46 frontend tests passing, and 37/37 live
+smoke checks against the deployed stack (11 Oct 2026).
 
 ## Problem
 
@@ -27,19 +40,16 @@ One deployment can serve several campuses (tenants). The pilot tenant is
 
 ## How it works
 
-1. A reporter opens the campus page, picks "waterlogging" or "blocked drain",
-   adds a description and an optional landmark or map pin, and submits. They
-   get a reference code back. The report itself is not publicly readable.
-2. An operator sees it in the queue (newest first, filtered by status,
-   severity, type or age). They set a severity and give a reason:
-   - S1: blocks access or is near electricals.
-   - S2: ponding or spreading.
-   - S3: minor.
-3. The operator assigns a field worker, again with a reason.
-4. Only the assigned worker can start and resolve the job. Resolving needs a
-   summary. Photos are uploaded straight to S3.
-5. The operator checks the work. They close the incident, or send it back to
-   in progress with a reason. A closed incident can be reopened with a reason.
+1. **Report.** Someone scans the QR poster, picks waterlogging or blocked
+   drain, says where it is (or shares their location), and gets a reference
+   code. No account needed.
+2. **Triage and assign.** An operator sets a severity with a reason (S1 blocks
+   access or is near electricals, S2 ponding or spreading, S3 minor) and
+   assigns a field worker.
+3. **Fix with evidence.** Only the assigned worker can start and resolve the
+   job. They add before and after photos and write a resolution summary.
+4. **Verify and close.** The operator checks the work and closes it, or sends
+   it back with a reason. A closed incident can be reopened with a reason.
 
 ```
 reported -> triaged -> assigned -> in_progress -> resolved -> closed
@@ -49,9 +59,6 @@ reported -> triaged -> assigned -> in_progress -> resolved -> closed
 
 The server enforces these rules. Every change writes an audit event (who, what,
 before, after, when) in the same database transaction as the change itself.
-
-Status: the backend is deployed and smoke-tested. The web frontend
-(`apps/web`, Next.js static export) is being built separately.
 
 ## Architecture
 
