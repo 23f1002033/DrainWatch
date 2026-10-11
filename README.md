@@ -185,6 +185,39 @@ scripts/deploy_web.sh
 `scripts/reset_demo.py <tenant>` clears one tenant's incidents, events and
 idempotency records. It keeps staff accounts and asks for confirmation first.
 
+## Demo data
+
+Everything in the deployed demo is made up for demonstration. None of it is
+real reports or real users.
+
+- **Staff accounts.** `op-demo`, `fw-ravi`, `fw-meena` and `op-other` are demo
+  accounts on `@example.com` addresses, created by `scripts/seed_demo.py`.
+- **Incidents.** `scripts/seed_demo_incidents.py` creates six fictional
+  incidents in `demo-campus` through the public report API: a blocked drain at
+  a hostel gate, ponding at a library entrance, water near an electrical panel
+  by a canteen, an overflowing manhole, a slow drain behind a sports ground,
+  and a puddle at a bus stop.
+  - Then, as `op-demo`, it triages three of them and assigns two to Ravi, so
+    the queue shows a mix of statuses.
+  - The descriptions and landmarks are invented.
+  - The coordinates are made-up offsets of a few hundred metres around an
+    illustrative centre point, by default `12.9716, 77.5946` (central
+    Bengaluru). This is not a real campus layout. Override the centre with
+    `DW_DEMO_LAT` and `DW_DEMO_LNG`.
+- **Smoke test incidents.** `scripts/smoke.sh` also files test incidents while
+  it runs.
+
+To get a clean demo queue:
+
+```
+uv run --project services/api python scripts/reset_demo.py demo-campus
+uv run --project services/api python scripts/seed_demo_incidents.py
+```
+
+The seed script refuses to run if the tenant has incidents other than its
+own. Running it again within 24 hours returns the same incidents instead of
+creating duplicates.
+
 ## Tear down
 
 See [docs/teardown.md](docs/teardown.md). In short:
