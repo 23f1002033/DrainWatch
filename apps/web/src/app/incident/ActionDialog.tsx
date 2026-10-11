@@ -6,7 +6,7 @@ import { Button, ErrorBox, Field, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { ActionSpec } from "@/lib/actions";
 import { mutate } from "@/lib/mutation";
-import { SEVERITIES, SEVERITY_HELP, type Incident, type Severity, type Worker } from "@/lib/types";
+import { SEVERITIES, SEVERITY_HELP, type Incident, type Severity, type Member } from "@/lib/types";
 
 const TEXT_MAX = { triage: 1000, assign: 1000 } as Record<string, number>;
 
@@ -21,7 +21,7 @@ export function ActionDialog({
 }: {
   action: ActionSpec | null;
   incident: Incident;
-  workers: Worker[];
+  workers: Member[];
   onClose: () => void;
   onApplied: (next: Incident, label: string) => void;
   onConflict: () => void;

@@ -10,7 +10,7 @@ import type {
   Severity,
   Status,
   UploadTicket,
-  Worker,
+  Member,
 } from "./types";
 
 type Fetch = typeof fetch;
@@ -83,8 +83,8 @@ export const api = {
   events(id: string) {
     return request<{ items: IncidentEvent[] }>(`/api/v1/incidents/${encodeURIComponent(id)}/events`);
   },
-  workers() {
-    return request<{ items: Worker[] }>(`/api/v1/workers`);
+  members() {
+    return request<{ items: Member[] }>(`/api/v1/members`);
   },
   triage(id: string, expected_version: number, severity: Severity, reason: string) {
     return request<Incident>(`/api/v1/incidents/${encodeURIComponent(id)}/triage`, {

@@ -11,7 +11,8 @@ import { isRetryable } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
 import { CONFLICT_MESSAGE } from "@/lib/mutation";
 import { useSession } from "@/lib/useSession";
-import { useWorkers } from "@/lib/useWorkers";
+import { useMembers } from "@/lib/useMembers";
+import { keepEvidenceUrls, needsUrlRefresh, refreshDelayMs } from "@/lib/evidence";
 import { TYPE_LABEL, type Incident, type IncidentEvent } from "@/lib/types";
 import { ActionDialog } from "./ActionDialog";
 import { EvidencePanel } from "./EvidencePanel";
@@ -20,7 +21,7 @@ import { Timeline } from "./Timeline";
 export function IncidentScreen() {
   const { session } = useSession();
   const id = useSearchParams().get("id") ?? "";
-  const { workers, error: workersError, nameOf, knownName } = useWorkers(session);
+  const { workers, error: workersError, nameOf, knownName } = useMembers(session);
   const [incident, setIncident] = useState<Incident | null>(null);
   const [events, setEvents] = useState<IncidentEvent[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -37,10 +38,13 @@ export function IncidentScreen() {
     }
   }, [id]);
 
+  const refreshDetail = useCallback(async () => {
+    setIncident(await api.get(id));
+  }, [id]);
+
   const reload = useCallback(async () => {
-    const [inc] = await Promise.all([api.get(id), reloadEvents()]);
-    setIncident(inc);
-  }, [id, reloadEvents]);
+    await Promise.all([refreshDetail(), reloadEvents()]);
+  }, [refreshDetail, reloadEvents]);
 
   const initialLoad = useCallback(async () => {
     setLoadError(null);
@@ -55,12 +59,21 @@ export function IncidentScreen() {
     if (session && id) void initialLoad();
   }, [session, id, initialLoad]);
 
+  const delay = incident ? refreshDelayMs(incident) : null;
+  useEffect(() => {
+    if (delay === null) return;
+    const timer = window.setTimeout(() => void refreshDetail().catch(() => undefined), delay);
+    return () => window.clearTimeout(timer);
+  }, [incident, delay, refreshDetail]);
+
   if (!session) return <Spinner label="Checking sign-in" />;
 
   function applied(next: Incident, message: string) {
-    setIncident(next);
+    const merged = keepEvidenceUrls(next, incident);
+    setIncident(merged);
     setNotice({ tone: "ok", text: message });
     void reloadEvents();
+    if (needsUrlRefresh(merged)) void refreshDetail().catch(() => undefined);
   }
 
   function conflicted() {
@@ -152,6 +165,7 @@ export function IncidentScreen() {
                   nameOf={nameOf}
                   onAdded={(next) => applied(next, "Photo added.")}
                   onConflict={() => void reload().catch(setLoadError)}
+                  onUrlsExpired={refreshDetail}
                 />
 
                 <section className="rounded-lg border border-slate-200 bg-white p-4">

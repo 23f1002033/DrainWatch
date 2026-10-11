@@ -33,6 +33,8 @@ export interface Evidence {
   kind: EvidenceKind;
   by: string;
   ts: string;
+  url?: string;
+  url_expires_in?: number;
 }
 
 export interface Incident {
@@ -65,9 +67,10 @@ export interface IncidentEvent {
   note: string | null;
 }
 
-export interface Worker {
+export interface Member {
   id: string;
   name: string;
+  role: Exclude<Role, "public">;
 }
 
 export interface PublicReport {

@@ -235,10 +235,15 @@ See [docs/teardown.md](docs/teardown.md). In short:
   deployment would need an index on status.
 - **Report spam.** Anonymous reports are protected only by throttling. There
   is no CAPTCHA and no duplicate detection.
-- **Photo metadata.** Photos are stored as uploaded. Location metadata (EXIF)
-  is not removed and images are not scanned.
+- **Photo metadata.** The web app removes EXIF and GPS data by re-encoding
+  photos before upload. The API does not enforce this, so a different client
+  could still upload a photo with metadata.
+- **Image scanning.** Uploaded images are not scanned for content or malware;
+  only type and size are checked.
 - **Backups.** Point-in-time recovery is off to keep cost down, so deleted
   data cannot be restored.
+- **Overdue flag.** The queue measures overdue from report time, so a reopened
+  incident shows as overdue immediately.
 - **Staff setup.** Staff are added with `scripts/seed_demo.py`. There is no
   admin screen for managing users.
 - **No notifications.** Workers are not notified when a job is assigned to

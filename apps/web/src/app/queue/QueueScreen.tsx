@@ -8,7 +8,8 @@ import { Button, Empty, ErrorBox, SeverityBadge, Spinner, StatusChip } from "@/c
 import { api } from "@/lib/api";
 import { age } from "@/lib/format";
 import { useSession } from "@/lib/useSession";
-import { useWorkers } from "@/lib/useWorkers";
+import { useMembers } from "@/lib/useMembers";
+import { OVERDUE_RULES, QUICK_VIEWS, applyQuickView, isOverdue, quickViewCounts, type QuickViewId } from "@/lib/queue";
 import dynamic from "next/dynamic";
 import {
   INCIDENT_TYPES,
@@ -44,11 +45,12 @@ export function QueueScreen() {
   const { session } = useSession();
   const router = useRouter();
   const params = useSearchParams();
-  const { nameOf } = useWorkers(session);
+  const { nameOf } = useMembers(session);
 
   const isWorker = session?.role === "field_worker";
   const tab = isWorker && params.get("tab") !== "all" ? "mine" : "all";
   const view = params.get("view") === "map" ? "map" : "list";
+  const quick: QuickViewId = QUICK_VIEWS.find((v) => v.id === params.get("qv"))?.id ?? "open";
   const query: QueueQuery = useMemo(() => {
     const hours = Number(params.get("age"));
     return {
@@ -71,6 +73,12 @@ export function QueueScreen() {
   const [moreError, setMoreError] = useState<unknown>(null);
 
   const seq = useRef(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const load = useCallback(async () => {
     const mine = ++seq.current;
@@ -80,6 +88,7 @@ export function QueueScreen() {
     try {
       const page = await api.queue({ ...query, limit: pageSize });
       if (mine !== seq.current) return;
+      setNow(Date.now());
       setItems(page.items);
       setCursor(page.next_cursor);
     } catch (e) {
@@ -120,7 +129,10 @@ export function QueueScreen() {
 
   if (!session) return <Spinner label="Checking sign-in" />;
 
-  const visible = tab === "mine" ? items.filter((i) => i.assigned_to === session.sub) : items;
+  const scoped = tab === "mine" ? items.filter((i) => i.assigned_to === session.sub) : items;
+  const counts = quickViewCounts(scoped, now);
+  const visible = applyQuickView(scoped, quick, now);
+  const quickLabel = QUICK_VIEWS.find((v) => v.id === quick)!.label;
   const filtersActive = Boolean(query.status || query.severity || query.type || query.older_than_hours);
 
   return (
@@ -171,6 +183,40 @@ export function QueueScreen() {
           </div>
         )}
 
+        <div className="mt-3 overflow-x-auto">
+          <div role="tablist" aria-label="Quick views" className="flex min-w-max gap-1 border-b border-slate-200">
+            {QUICK_VIEWS.map((v) => {
+              const selected = quick === v.id;
+              return (
+                <button
+                  key={v.id}
+                  role="tab"
+                  type="button"
+                  aria-selected={selected}
+                  onClick={() => setParam("qv", v.id === "open" ? "" : v.id)}
+                  className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm whitespace-nowrap ${
+                    selected ? "border-accent font-medium text-slate-900" : "border-transparent text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  {v.label}
+                  <span
+                    className={`rounded-full px-1.5 text-xs tabular-nums ${
+                      v.id === "overdue" && counts.overdue > 0 ? "bg-red-100 text-red-800" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {loading ? "-" : counts[v.id]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="mt-1.5 text-xs text-slate-500">
+          <span className="font-medium text-red-700">Overdue</span>: not triaged within {OVERDUE_RULES.triageWithinHours} h, or not resolved
+          within {OVERDUE_RULES.resolveWithinHours.S1} h (S1), {OVERDUE_RULES.resolveWithinHours.S2} h (S2), {OVERDUE_RULES.resolveWithinHours.S3} h
+          (S3), counted from report time. Counts cover the {scoped.length} loaded incidents.
+        </p>
+
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
           <Select label="Status" value={query.status ?? ""} onChange={(v) => setParam("status", v)}>
             <option value="">All statuses</option>
@@ -210,7 +256,7 @@ export function QueueScreen() {
               title={filtersActive ? undefined : "No filters applied"}
               onClick={() => {
                 const keep = new URLSearchParams();
-                for (const k of ["tab", "view", "limit"]) {
+                for (const k of ["tab", "view", "limit", "qv"]) {
                   const v = params.get(k);
                   if (v) keep.set(k, v);
                 }
@@ -230,18 +276,20 @@ export function QueueScreen() {
             <ErrorBox error={error} onRetry={() => void load()} />
           ) : visible.length === 0 ? (
             <Empty>
-              {tab === "mine"
-                ? cursor
-                  ? "Nothing assigned to you on this page. Load more to check older incidents."
-                  : "Nothing is assigned to you right now."
-                : filtersActive
-                  ? "No incidents match these filters."
-                  : "No incidents reported yet."}
+              {scoped.length > 0
+                ? `Nothing in ${quickLabel} among the ${scoped.length} loaded incidents.${cursor ? " Load more to check older ones." : ""}`
+                : tab === "mine"
+                  ? cursor
+                    ? "Nothing assigned to you on this page. Load more to check older incidents."
+                    : "Nothing is assigned to you right now."
+                  : filtersActive
+                    ? "No incidents match these filters."
+                    : "No incidents reported yet."}
             </Empty>
           ) : view === "map" ? (
             <QueueMap items={visible} />
           ) : (
-            <IncidentList items={visible} nameOf={nameOf} />
+            <IncidentList items={visible} nameOf={nameOf} now={now} />
           )}
 
           {!loading && !error && (
@@ -281,7 +329,24 @@ function Select({ label, value, onChange, children }: { label: string; value: st
   );
 }
 
-function IncidentList({ items, nameOf }: { items: Incident[]; nameOf: (sub: string | null) => string }) {
+function OverdueChip() {
+  return <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800 ring-1 ring-red-200 ring-inset">Overdue</span>;
+}
+
+function Location({ incident }: { incident: Incident }) {
+  return (
+    <>
+      <span className="block truncate text-slate-800">
+        {incident.landmark || (incident.lat !== null ? "Location shared (GPS)" : <span className="text-slate-400">No location text</span>)}
+      </span>
+      <span className="block truncate text-xs text-slate-500">{incident.description}</span>
+    </>
+  );
+}
+
+function IncidentList({ items, nameOf, now }: { items: Incident[]; nameOf: (sub: string | null) => string; now: number }) {
+  const router = useRouter();
+  const open = (id: string) => router.push(`/incident/?id=${id}`);
   return (
     <>
       <ul className="space-y-2 md:hidden">
@@ -290,40 +355,54 @@ function IncidentList({ items, nameOf }: { items: Incident[]; nameOf: (sub: stri
             <Link href={`/incident/?id=${i.id}`} className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-slate-400">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-xs text-slate-500">{i.reference}</span>
-                <span className="text-xs text-slate-500">{age(i.created_at)} ago</span>
+                <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                  {isOverdue(i, now) && <OverdueChip />}
+                  {age(i.created_at, now)} ago
+                </span>
               </div>
               <div className="mt-1 flex items-center gap-2">
                 <SeverityBadge severity={i.severity} />
                 <StatusChip status={i.status} />
                 <span className="text-sm font-medium">{TYPE_LABEL[i.type]}</span>
               </div>
-              <p className="mt-1 line-clamp-2 text-sm text-slate-700">{i.landmark || i.description}</p>
+              <div className="mt-1 text-sm">
+                <Location incident={i} />
+              </div>
               <p className="mt-1 text-xs text-slate-500">{nameOf(i.assigned_to)}</p>
             </Link>
           </li>
         ))}
       </ul>
       <div className="hidden overflow-hidden rounded-lg border border-slate-200 bg-white md:block">
-        <table className="w-full text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-2 font-medium">Reference</th>
-              <th className="px-3 py-2 font-medium">Severity</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Type</th>
+              <th className="w-32 px-3 py-2 font-medium">Reference</th>
+              <th className="w-24 px-3 py-2 font-medium">Severity</th>
+              <th className="w-28 px-3 py-2 font-medium">Status</th>
+              <th className="w-32 px-3 py-2 font-medium">Type</th>
               <th className="px-3 py-2 font-medium">Location</th>
-              <th className="px-3 py-2 font-medium">Assignee</th>
-              <th className="px-3 py-2 font-medium">Age</th>
+              <th className="w-32 px-3 py-2 font-medium">Assignee</th>
+              <th className="w-32 px-3 py-2 font-medium">Age</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {items.map((i) => (
-              <tr key={i.id} className="hover:bg-slate-50">
-                <td className="px-3 py-2">
-                  <Link href={`/incident/?id=${i.id}`} className="font-mono text-accent underline-offset-2 hover:underline">
-                    {i.reference}
-                  </Link>
-                </td>
+              <tr
+                key={i.id}
+                tabIndex={0}
+                role="link"
+                aria-label={`Open incident ${i.reference}`}
+                onClick={() => open(i.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    open(i.id);
+                  }
+                }}
+                className="cursor-pointer hover:bg-slate-50 focus-visible:bg-blue-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+              >
+                <td className="px-3 py-2 font-mono text-accent">{i.reference}</td>
                 <td className="px-3 py-2">
                   <SeverityBadge severity={i.severity} />
                 </td>
@@ -331,12 +410,15 @@ function IncidentList({ items, nameOf }: { items: Incident[]; nameOf: (sub: stri
                   <StatusChip status={i.status} />
                 </td>
                 <td className="px-3 py-2">{TYPE_LABEL[i.type]}</td>
-                <td className="max-w-xs truncate px-3 py-2 text-slate-700" title={i.landmark || i.description}>
-                  {i.landmark || i.description}
+                <td className="px-3 py-2" title={`${i.landmark ?? ""}\n${i.description}`.trim()}>
+                  <Location incident={i} />
                 </td>
-                <td className="px-3 py-2 text-slate-700">{nameOf(i.assigned_to)}</td>
+                <td className="truncate px-3 py-2 text-slate-700">{nameOf(i.assigned_to)}</td>
                 <td className="px-3 py-2 text-slate-500" title={i.created_at}>
-                  {age(i.created_at)}
+                  <span className="flex items-center gap-1.5">
+                    {age(i.created_at, now)}
+                    {isOverdue(i, now) && <OverdueChip />}
+                  </span>
                 </td>
               </tr>
             ))}
