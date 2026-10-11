@@ -46,6 +46,33 @@ req() { # method url token [json]
 body() { cat "$WORK/body"; }
 jq_() { "${PY[@]}" -c "import json,sys; d=json.load(open('$WORK/body')); print($1)"; }
 
+# CORS preflight as a browser sends it. Must be 2xx, echo the origin and allow our headers.
+# Regression guard: an ANY route sends OPTIONS to the JWT authorizer and answers 401.
+ORIGINS=${SMOKE_ORIGINS:-"https://main.d2m9rrzhq9d5qo.amplifyapp.com http://localhost:3000"}
+REQ_HEADERS="authorization,content-type,idempotency-key"
+preflight() { # path method origin -> "status|allow-origin|allow-headers"
+  curl -s -o /dev/null -D - -X OPTIONS "$API$1" -H "Origin: $3" \
+    -H "Access-Control-Request-Method: $2" -H "Access-Control-Request-Headers: $REQ_HEADERS" \
+    | tr -d '\r' | awk -F': ' '
+      /^HTTP/ {s=$2; split($0, a, " "); s=a[2]}
+      tolower($1)=="access-control-allow-origin" {o=$2}
+      tolower($1)=="access-control-allow-headers" {h=tolower($2)}
+      END {print s "|" o "|" h}'
+}
+for origin in $ORIGINS; do
+  for route in "GET /incidents" "POST /incidents/01J00000000000000000000000/transitions" \
+               "POST /public/demo-campus/incidents"; do
+    IFS='|' read -r st ao ah <<<"$(preflight "/api/v1${route#* }" "${route%% *}" "$origin")"
+    ok=yes
+    [[ "$st" == 2?? ]] || ok="status $st"
+    [[ "$ao" == "$origin" ]] || ok="allow-origin '$ao'"
+    for h in ${REQ_HEADERS//,/ }; do [[ ",$ah," == *",$h,"* ]] || ok="missing allow-header $h"; done
+    check "preflight $route from $origin" yes "$ok"
+  done
+done
+IFS='|' read -r st ao ah <<<"$(preflight /api/v1/incidents GET https://evil.example.com)"
+check "preflight from other origin gets no allow-origin" "" "$ao"
+
 KEY="smoke-$(date +%s)"
 REPORT='{"type":"blocked_drain","description":"Smoke test: drain blocked near main gate","landmark":"Main gate"}'
 code=$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$API/public/demo-campus/incidents" \

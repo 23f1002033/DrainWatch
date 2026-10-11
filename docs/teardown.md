@@ -31,14 +31,19 @@ credentials used to deploy. Region ap-south-1, stack `drainwatch`.
        aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default \
          --region ap-south-1
 
-4. Optional: delete the budget once billing has settled (a few days later).
+4. Delete the Amplify Hosting app (frontend). It is not part of the stack.
+
+       aws amplify delete-app --app-id d2m9rrzhq9d5qo --region ap-south-1
+
+5. Optional: delete the budget once billing has settled (a few days later).
 
        aws budgets delete-budget --account-id <ACCOUNT_ID> --budget-name drainwatch-5usd
 
-5. Check that nothing is left.
+6. Check that nothing is left.
 
        aws cloudformation list-stacks --region ap-south-1 \
          --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE DELETE_FAILED \
          --query "StackSummaries[].StackName"
        aws logs describe-log-groups --region ap-south-1 \
          --log-group-name-prefix /aws/lambda/drainwatch
+       aws amplify list-apps --region ap-south-1 --query "apps[].name"

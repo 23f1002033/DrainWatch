@@ -31,6 +31,7 @@ prices the first units at $0 (DynamoDB storage, Cognito MAU).
 | CloudFormation / SAM | no charge for AWS:: resource types | $0 |
 | SAM artifact bucket | S3 Standard, about 10 MB of zips | < $0.001 |
 | Data transfer out | first 100 GB/month to internet free account-wide | $0 |
+| Amplify Hosting (static, manual deploy) | $0.023 per GB-month stored (recurs until the app is deleted); $0.15 per GB served; no build minutes for manual deploys; no per-request charge for static files; WAF ($15/month) not enabled | < $0.02 (a few MB stored, about 100 MB served) |
 | KMS | not used (SSE-S3, DynamoDB AWS-owned key) | $0 |
 
 Expected total: about $0.10 for the week. At 10x the traffic it is about

@@ -3,9 +3,9 @@ Transform: AWS::Serverless-2016-10-31
 Description: DrainWatch Ops backend (pilot)
 
 Parameters:
-  AllowedOrigin:
-    Type: String
-    Default: http://localhost:3000
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: http://localhost:3000,https://main.d2m9rrzhq9d5qo.amplifyapp.com
   KnownTenants:
     Type: String
     Default: demo-campus,other-campus
@@ -56,7 +56,7 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedMethods: [POST]
-            AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedOrigins: !Ref AllowedOrigins
             AllowedHeaders: ["*"]
             MaxAge: 600
 
@@ -152,7 +152,7 @@ Resources:
               audience:
                 - !Ref AppClient
       CorsConfiguration:
-        AllowOrigins: [!Ref AllowedOrigin]
+        AllowOrigins: !Ref AllowedOrigins
         AllowMethods: [GET, POST, OPTIONS]
         AllowHeaders: [authorization, content-type, idempotency-key]
         ExposeHeaders: [x-request-id]
@@ -240,12 +240,20 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
-        Staff:
+        # Explicit methods, not ANY: an ANY route also catches OPTIONS, sending CORS
+        # preflights to the JWT authorizer (401). Unrouted OPTIONS get API Gateway's preflight.
+        StaffGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /api/v1/{proxy+}
-            Method: ANY
+            Method: GET
+        StaffPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/v1/{proxy+}
+            Method: POST
 
   AlarmTopic:
     Type: AWS::SNS::Topic
