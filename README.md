@@ -4,7 +4,7 @@ Scan a QR poster to report a flooded path or blocked drain; the facility team
 tracks it to a verified fix, with every step on an audit trail.
 
 [Live app](https://main.d2m9rrzhq9d5qo.amplifyapp.com) |
-[Demo video](VIDEO_URL) |
+[Demo video](https://youtu.be/cxApipNJfs4) |
 [Architecture](#architecture) |
 [Cost](#cost) |
 [Teardown](#tear-down)
