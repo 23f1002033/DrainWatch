@@ -15,6 +15,7 @@ dev = [
     "moto[dynamodb,s3]>=5",
     "ruff>=0.6",
     "uvicorn>=0.30",
+    "python-multipart>=0.0.32",
 ]
 
 [tool.uv]

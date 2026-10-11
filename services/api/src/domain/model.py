@@ -42,6 +42,14 @@ class Actor:
 
 
 @dataclass(frozen=True)
+class Member:
+    tenant_id: str
+    sub: str
+    name: str
+    role: Role
+
+
+@dataclass(frozen=True)
 class Incident:
     tenant_id: str
     id: str

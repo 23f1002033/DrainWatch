@@ -1,14 +1,8 @@
-CLAUDE.md
-.env
-.env.*
-!.env.example
 .venv/
 __pycache__/
-*.pyc
 .pytest_cache/
 .ruff_cache/
 .aws-sam/
-node_modules/
-.next/
-out/
-.DS_Store
+.env
+*.env
+CLAUDE.md

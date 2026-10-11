@@ -43,7 +43,7 @@ def test_unassigned_field_worker_forbidden(client):
     assert post(client, inc, "transitions", FW2, to="in_progress").status_code == 403
     resp = client.post(
         f"/api/v1/incidents/{inc['id']}/uploads",
-        json={"content_type": "image/jpeg", "content_length": 100},
+        json={"content_type": "image/jpeg"},
         headers=FW2,
     )
     assert resp.status_code == 403
@@ -60,9 +60,7 @@ def test_other_tenant_gets_404_everywhere(client):
         assert resp.json()["error"]["code"] == "NOT_FOUND"
     resp = post(client, inc, "assignments", OTHER_OP, worker_id="fw-91", reason="x")
     assert resp.status_code == 404
-    up = client.post(
-        f"{base}/uploads", json={"content_type": "image/png", "content_length": 1}, headers=OTHER_OP
-    )
+    up = client.post(f"{base}/uploads", json={"content_type": "image/png"}, headers=OTHER_OP)
     assert up.status_code == 404
 
 

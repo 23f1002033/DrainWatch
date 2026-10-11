@@ -38,7 +38,6 @@ class TransitionIn(_In):
 
 class UploadIn(_In):
     content_type: str
-    content_length: int
 
 
 class EvidenceIn(_In):

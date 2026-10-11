@@ -1,6 +1,8 @@
 import base64
 import binascii
+import logging
 import re
+import time
 import uuid
 from typing import Annotated
 
@@ -9,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from api import logs
 from api.schemas import (
     AssignIn,
     EvidenceIn,
@@ -24,6 +27,7 @@ from api.settings import Settings
 from auth.identity import resolve_actor
 from domain.errors import BadRequest, DomainError
 from domain.model import Actor, IncidentType, Severity, Status
+from repo.storage import ALLOWED_CONTENT_TYPES, MAX_UPLOAD_BYTES, StubStore
 
 IDEM_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 TENANT_RE = r"^[a-z0-9-]{1,64}$"
@@ -58,15 +62,48 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         aws_event = request.scope.get("aws.event") or {}
+        aws_context = request.scope.get("aws.context")
         request.state.request_id = (aws_event.get("requestContext") or {}).get(
             "requestId"
         ) or uuid.uuid4().hex
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = request.state.request_id
-        return response
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-Id"] = request.state.request_id
+            return response
+        except Exception as exc:
+            logs.log(
+                logging.ERROR,
+                "unhandled_error",
+                request_id=request.state.request_id,
+                error_type=type(exc).__name__,
+                frames=logs.frames(exc),
+            )
+            raise
+        finally:
+            actor = getattr(request.state, "actor", None)
+            route = request.scope.get("route")
+            params = request.scope.get("path_params") or {}
+            logs.log(
+                logging.INFO,
+                "request",
+                request_id=request.state.request_id,
+                lambda_request_id=getattr(aws_context, "aws_request_id", None),
+                method=request.method,
+                route=getattr(route, "path", None),
+                status=status,
+                duration_ms=round((time.perf_counter() - started) * 1000, 1),
+                tenant_id=actor.tenant_id if actor else params.get("tenant"),
+                role=str(actor.role) if actor else None,
+                incident_id=params.get("incident_id"),
+                error_code=getattr(request.state, "error_code", None),
+            )
 
     @app.exception_handler(DomainError)
     async def domain_error(request: Request, exc: DomainError):
+        request.state.error_code = exc.code
         return error_response(request, exc.status_code, exc.code, exc.message)
 
     @app.exception_handler(RequestValidationError)
@@ -86,7 +123,9 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
         return error_response(request, 500, "INTERNAL", "internal error")
 
     def current_actor(request: Request) -> Actor:
-        return resolve_actor(request.headers, request.scope.get("aws.event"), settings.app_env)
+        actor = resolve_actor(request.headers, request.scope.get("aws.event"), settings.app_env)
+        request.state.actor = actor
+        return actor
 
     ActorDep = Annotated[Actor, Depends(current_actor)]
     IncidentId = Annotated[str, Path(max_length=26)]
@@ -143,14 +182,13 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
 
     @v1.post("/incidents/{incident_id}/uploads", status_code=201)
     def upload(actor: ActorDep, incident_id: IncidentId, body: UploadIn):
-        key, signed = service.presign_upload(
-            actor, incident_id, body.content_type, body.content_length
-        )
+        key, signed = service.presign_upload(actor, incident_id, body.content_type)
         return {
             "key": key,
             "url": signed.url,
-            "method": "PUT",
-            "headers": signed.headers,
+            "method": "POST",
+            "fields": signed.fields,
+            "max_bytes": MAX_UPLOAD_BYTES,
             "expires_in": signed.expires_in,
         }
 
@@ -164,15 +202,24 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
 
     @v1.get("/workers")
     def workers(actor: ActorDep):
-        return {"items": [{"id": w.id, "name": w.name} for w in service.list_workers(actor)]}
+        return {"items": [{"id": m.sub, "name": m.name} for m in service.list_workers(actor)]}
 
     app.include_router(v1)
 
-    if settings.app_env == "local":
+    if settings.app_env == "local" and isinstance(service.store, StubStore):
+        store = service.store
 
-        @app.put("/_stub-upload/{key:path}", include_in_schema=False)
-        async def stub_upload(key: str, request: Request):
-            size = len(await request.body())
-            return {"stored": False, "key": key, "bytes": size}
+        @app.post("/_stub-upload", include_in_schema=False, status_code=204)
+        async def stub_upload(request: Request):
+            form = await request.form()
+            key, content_type, upload = form.get("key"), form.get("Content-Type"), form.get("file")
+            if not isinstance(key, str) or upload is None or isinstance(upload, str):
+                raise BadRequest("key, Content-Type and file are required")
+            if content_type not in ALLOWED_CONTENT_TYPES:
+                raise BadRequest("Content-Type not allowed by policy")
+            size = len(await upload.read())
+            if not 0 < size <= MAX_UPLOAD_BYTES:
+                raise BadRequest("EntityTooLarge or empty")
+            store.put(key, size, content_type)
 
     return app

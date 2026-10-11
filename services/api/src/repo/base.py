@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from domain.model import Event, Incident, Severity, Status
+from domain.model import Event, Incident, Member, Severity, Status
 
 INC_PREFIX = "INC#"
 EVT_PREFIX = "EVT#"
 IDEM_PREFIX = "IDEM#"
+MEMBER_PREFIX = "MEMBER#"
 IDEM_TTL_SECONDS = 24 * 3600
 # Queue pages read at most this many DynamoDB pages before returning a partial page.
 MAX_QUERY_PAGES = 5
@@ -75,3 +76,7 @@ class Repo(Protocol):
     ) -> Page: ...
 
     def list_events(self, tenant_id: str, incident_id: str) -> list[Event]: ...
+
+    def put_member(self, member: Member) -> None: ...
+
+    def list_members(self, tenant_id: str) -> list[Member]: ...

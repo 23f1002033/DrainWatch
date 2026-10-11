@@ -2,11 +2,12 @@ import copy
 import threading
 from typing import Any
 
-from domain.model import Event, Incident, Status
+from domain.model import Event, Incident, Member, Status
 from repo.base import (
     EVT_PREFIX,
     IDEM_PREFIX,
     INC_PREFIX,
+    MEMBER_PREFIX,
     ConditionFailed,
     IdempotencyExists,
     IdemRecord,
@@ -15,7 +16,14 @@ from repo.base import (
     events_pk,
     tenant_pk,
 )
-from repo.codec import event_to_item, incident_to_item, item_to_event, item_to_incident
+from repo.codec import (
+    event_to_item,
+    incident_to_item,
+    item_to_event,
+    item_to_incident,
+    item_to_member,
+    member_to_item,
+)
 
 
 class InMemoryRepo:
@@ -102,6 +110,16 @@ class InMemoryRepo:
         pk = events_pk(tenant_id, incident_id)
         sks = sorted(sk for (p, sk) in self._items if p == pk and sk.startswith(EVT_PREFIX))
         return [item_to_event(copy.deepcopy(self._items[(pk, sk)])) for sk in sks]
+
+    def put_member(self, member: Member) -> None:
+        item = member_to_item(member)
+        with self._lock:
+            self._items[(item["PK"], item["SK"])] = item
+
+    def list_members(self, tenant_id: str) -> list[Member]:
+        pk = tenant_pk(tenant_id)
+        sks = sorted(sk for (p, sk) in self._items if p == pk and sk.startswith(MEMBER_PREFIX))
+        return [item_to_member(self._items[(pk, sk)]) for sk in sks]
 
 
 def _matches(item: dict[str, Any], flt: QueueFilter) -> bool:

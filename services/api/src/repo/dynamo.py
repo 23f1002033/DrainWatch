@@ -3,12 +3,13 @@ from typing import Any
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from botocore.exceptions import ClientError
 
-from domain.model import Event, Incident, Status
+from domain.model import Event, Incident, Member, Status
 from repo.base import (
     EVT_PREFIX,
     IDEM_PREFIX,
     INC_PREFIX,
     MAX_QUERY_PAGES,
+    MEMBER_PREFIX,
     ConditionFailed,
     IdempotencyExists,
     IdemRecord,
@@ -23,6 +24,8 @@ from repo.codec import (
     incident_to_item,
     item_to_event,
     item_to_incident,
+    item_to_member,
+    member_to_item,
     to_dynamo_safe,
 )
 
@@ -197,20 +200,28 @@ class DynamoRepo:
             params["ExclusiveStartKey"] = last
         return Page(matched, last["SK"]["S"])
 
-    def list_events(self, tenant_id: str, incident_id: str) -> list[Event]:
+    def _query_all(self, pk: str, prefix: str) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "TableName": self._table,
-            "KeyConditionExpression": "PK = :pk AND begins_with(SK, :evt)",
-            "ExpressionAttributeValues": {
-                ":pk": {"S": events_pk(tenant_id, incident_id)},
-                ":evt": {"S": EVT_PREFIX},
-            },
+            "KeyConditionExpression": "PK = :pk AND begins_with(SK, :prefix)",
+            "ExpressionAttributeValues": {":pk": {"S": pk}, ":prefix": {"S": prefix}},
             "ConsistentRead": True,
         }
-        events: list[Event] = []
+        items: list[dict[str, Any]] = []
         while True:
             resp = self._db.query(**params)
-            events.extend(item_to_event(_load(i)) for i in resp.get("Items", []))
+            items.extend(_load(i) for i in resp.get("Items", []))
             if "LastEvaluatedKey" not in resp:
-                return events
+                return items
             params["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+    def list_events(self, tenant_id: str, incident_id: str) -> list[Event]:
+        return [
+            item_to_event(i) for i in self._query_all(events_pk(tenant_id, incident_id), EVT_PREFIX)
+        ]
+
+    def put_member(self, member: Member) -> None:
+        self._db.put_item(TableName=self._table, Item=_dump(member_to_item(member)))
+
+    def list_members(self, tenant_id: str) -> list[Member]:
+        return [item_to_member(i) for i in self._query_all(tenant_pk(tenant_id), MEMBER_PREFIX)]

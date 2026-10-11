@@ -2,8 +2,8 @@ from dataclasses import asdict
 from decimal import Decimal
 from typing import Any
 
-from domain.model import Event, Incident, IncidentType, Role, Severity, Status
-from repo.base import EVT_PREFIX, INC_PREFIX, events_pk, tenant_pk
+from domain.model import Event, Incident, IncidentType, Member, Role, Severity, Status
+from repo.base import EVT_PREFIX, INC_PREFIX, MEMBER_PREFIX, events_pk, tenant_pk
 
 
 def to_dynamo_safe(value: Any) -> Any:
@@ -61,3 +61,22 @@ def item_to_event(item: dict[str, Any]) -> Event:
     data["actor_role"] = Role(data["actor_role"])
     data.setdefault("before", None)
     return Event(**data)
+
+
+def member_to_item(member: Member) -> dict[str, Any]:
+    return {
+        "PK": tenant_pk(member.tenant_id),
+        "SK": MEMBER_PREFIX + member.sub,
+        "sub": member.sub,
+        "name": member.name,
+        "role": str(member.role),
+    }
+
+
+def item_to_member(item: dict[str, Any]) -> Member:
+    return Member(
+        tenant_id=item["PK"].removeprefix("TENANT#"),
+        sub=item["sub"],
+        name=item["name"],
+        role=Role(item["role"]),
+    )

@@ -4,7 +4,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from auth.directory import Worker, WorkerDirectory
 from domain import lifecycle
 from domain.errors import (
     BadRequest,
@@ -21,6 +20,7 @@ from domain.model import (
     EvidenceKind,
     Incident,
     IncidentType,
+    Member,
     Role,
     Severity,
     Status,
@@ -36,7 +36,13 @@ from repo.base import (
     QueueFilter,
     Repo,
 )
-from repo.storage import ALLOWED_CONTENT_TYPES, MAX_UPLOAD_BYTES, PresignedPut, Signer
+from repo.storage import (
+    ALLOWED_CONTENT_TYPES,
+    CONTENT_TYPE_FOR_EXT,
+    MAX_UPLOAD_BYTES,
+    EvidenceStore,
+    PresignedPost,
+)
 
 Clock = Callable[[], datetime]
 
@@ -61,14 +67,12 @@ class IncidentService:
     def __init__(
         self,
         repo: Repo,
-        workers: WorkerDirectory,
-        signer: Signer,
+        store: EvidenceStore,
         tenants: frozenset[str],
         clock: Clock = utc_now,
     ) -> None:
         self.repo = repo
-        self.workers = workers
-        self.signer = signer
+        self.store = store
         self.tenants = tenants
         self.clock = clock
 
@@ -164,9 +168,12 @@ class IncidentService:
         self.get(actor, incident_id)
         return self.repo.list_events(actor.tenant_id, incident_id)
 
-    def list_workers(self, actor: Actor) -> list[Worker]:
+    def list_workers(self, actor: Actor) -> list[Member]:
         require_operator(actor)
-        return self.workers.list_workers(actor.tenant_id)
+        return self._field_workers(actor.tenant_id)
+
+    def _field_workers(self, tenant_id: str) -> list[Member]:
+        return [m for m in self.repo.list_members(tenant_id) if m.role is Role.FIELD_WORKER]
 
     def triage(self, actor, incident_id, expected_version, severity, reason) -> Incident:
         require_operator(actor)
@@ -179,7 +186,7 @@ class IncidentService:
 
     def assign(self, actor, incident_id, expected_version, worker_id, reason) -> Incident:
         require_operator(actor)
-        if worker_id not in {w.id for w in self.workers.list_workers(actor.tenant_id)}:
+        if worker_id not in {m.sub for m in self._field_workers(actor.tenant_id)}:
             raise Invalid("unknown worker")
         return self._apply(
             actor,
@@ -197,18 +204,16 @@ class IncidentService:
         )
 
     def presign_upload(
-        self, actor: Actor, incident_id: str, content_type: str, content_length: int
-    ) -> tuple[str, PresignedPut]:
+        self, actor: Actor, incident_id: str, content_type: str
+    ) -> tuple[str, PresignedPost]:
         incident = self.get(actor, incident_id)
         if actor.role is Role.FIELD_WORKER and incident.assigned_to != actor.sub:
             raise Forbidden("only the assigned field worker can upload")
         ext = ALLOWED_CONTENT_TYPES.get(content_type)
         if ext is None:
             raise Invalid("content_type must be image/jpeg, image/png or image/webp")
-        if not 0 < content_length <= MAX_UPLOAD_BYTES:
-            raise Invalid(f"content_length must be between 1 and {MAX_UPLOAD_BYTES}")
         key = f"{evidence_prefix(actor.tenant_id, incident_id)}{new_ulid(self.clock())}.{ext}"
-        return key, self.signer.presign_put(key, content_type, content_length)
+        return key, self.store.presign_post(key, content_type)
 
     def add_evidence(self, actor: Actor, incident_id: str, key: str, kind: EvidenceKind):
         prefix = evidence_prefix(actor.tenant_id, incident_id)
@@ -222,6 +227,14 @@ class IncidentService:
         current = self.get(actor, incident_id)
         if any(e["key"] == key for e in current.evidence):
             raise Invalid("evidence already recorded")
+        lifecycle.can_add_evidence(current, actor, kind)
+        stored = self.store.head(key)
+        if stored is None:
+            raise Invalid("object not uploaded")
+        if not 0 < stored.size <= MAX_UPLOAD_BYTES:
+            raise Invalid(f"object must be between 1 and {MAX_UPLOAD_BYTES} bytes")
+        if stored.content_type != CONTENT_TYPE_FOR_EXT[ext]:
+            raise Invalid("object content type does not match its key")
         return self._apply(
             actor,
             incident_id,

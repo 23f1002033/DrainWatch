@@ -52,9 +52,21 @@ reads only matching items. There are no Scans.
 The cursor encodes only the SK. The partition always comes from the caller's
 tenant claim, so a cursor cannot cross tenants.
 
-## Not in M1
+| `TENANT#t` | `MEMBER#<sub>` | staff member: name, role (written by `scripts/seed_demo.py`) |
 
-- Workers list is a static seed in local mode and empty elsewhere. Cognito
-  group lookup comes with the deploy milestone.
-- Evidence keys are checked for shape and incident prefix, not for the object
-  actually existing in S3.
+## Uploads
+
+`POST /incidents/{id}/uploads {content_type}` returns a presigned S3 POST: the
+key is server-chosen under `<tenant>/incidents/<id>/`, the policy pins the key,
+the Content-Type (jpeg, png or webp) and `content-length-range` 1..5 MB.
+`POST /incidents/{id}/evidence` then runs HeadObject and answers 422 when the
+object is missing, larger than 5 MB, or its type does not match the key. The
+Lambda role has no `s3:ListBucket`, so a missing key shows up as 403 and is
+treated as missing. Locally the app serves `POST /_stub-upload` with the same
+rules.
+
+## Logs
+
+One JSON line per request (`request_id`, route template, status, duration,
+tenant, role, incident id, error code). Fields are allow-listed in
+`api/logs.py`; bodies, descriptions and notes are never logged.

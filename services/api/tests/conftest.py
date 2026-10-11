@@ -9,10 +9,10 @@ from moto import mock_aws
 from api.app import create_app
 from api.service import IncidentService
 from api.settings import Settings
-from auth.directory import LOCAL_WORKERS, StaticDirectory
+from domain.model import Member, Role
 from repo.dynamo import DynamoRepo, create_table
 from repo.memory import InMemoryRepo
-from repo.storage import StubSigner
+from repo.storage import StubStore
 
 DEMO = "demo-campus"
 OTHER = "other-campus"
@@ -27,6 +27,15 @@ FW1 = staff("fw-01", "field_worker")
 FW2 = staff("fw-02", "field_worker")
 OTHER_OP = staff("op-91", "operator", OTHER)
 OTHER_FW = staff("fw-91", "field_worker", OTHER)
+
+
+MEMBERS = [
+    Member(DEMO, "op-01", "Operator 01", Role.OPERATOR),
+    Member(DEMO, "fw-01", "Field Worker 01", Role.FIELD_WORKER),
+    Member(DEMO, "fw-02", "Field Worker 02", Role.FIELD_WORKER),
+    Member(OTHER, "op-91", "Operator 91", Role.OPERATOR),
+    Member(OTHER, "fw-91", "Field Worker 91", Role.FIELD_WORKER),
+]
 
 
 class FakeClock:
@@ -58,9 +67,9 @@ def repo(request):
 
 @pytest.fixture
 def service(repo, clock) -> IncidentService:
-    return IncidentService(
-        repo, StaticDirectory(LOCAL_WORKERS), StubSigner(), frozenset({DEMO, OTHER}), clock
-    )
+    for member in MEMBERS:
+        repo.put_member(member)
+    return IncidentService(repo, StubStore(), frozenset({DEMO, OTHER}), clock)
 
 
 @pytest.fixture
