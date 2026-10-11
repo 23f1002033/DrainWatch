@@ -1,25 +1,11 @@
-import io
 import json
 import logging
-
-import pytest
 
 from api import logs
 from tests.conftest import FW1, OP, incident_in, post
 
 SECRET_DESCRIPTION = "Secret-desc-7f3a water near the VC bungalow"
 SECRET_NOTE = "Secret-note-91bc cleared by contractor"
-
-
-@pytest.fixture
-def captured():
-    stream = io.StringIO()
-    handler = logging.StreamHandler(stream)
-    handler.setFormatter(logs.JsonFormatter())
-    logs.logger.addHandler(handler)
-    logs.logger.setLevel(logging.INFO)
-    yield stream
-    logs.logger.removeHandler(handler)
 
 
 def test_logs_are_json_and_never_contain_descriptions_or_notes(client, captured):

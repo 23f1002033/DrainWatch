@@ -168,6 +168,13 @@ class IncidentService:
         self.get(actor, incident_id)
         return self.repo.list_events(actor.tenant_id, incident_id)
 
+    def get_with_evidence_urls(self, actor: Actor, incident_id: str):
+        incident = self.get(actor, incident_id)
+        return incident, {e["key"]: self.store.presign_get(e["key"]) for e in incident.evidence}
+
+    def list_members(self, actor: Actor) -> list[Member]:
+        return self.repo.list_members(actor.tenant_id)
+
     def list_workers(self, actor: Actor) -> list[Member]:
         require_operator(actor)
         return self._field_workers(actor.tenant_id)

@@ -136,6 +136,17 @@ aws s3api head-object --bucket "$(out EvidenceBucketName)" --key "$S3KEY" \
 check "public GET of object -> 403" 403 \
   "$(curl -s -o /dev/null -w '%{http_code}' "${S3URL%/}/$S3KEY")"
 
+check "detail with evidence URL" 200 "$(req GET "$API/incidents/$ID" "$RAVI")"
+PHOTO_URL=$(jq_ "d['evidence'][0]['url']")
+check "evidence URL expires in 300 s" 300 "$(jq_ "d['evidence'][0]['url_expires_in']")"
+code=$(curl -s -o "$WORK/download" -w '%{http_code} %{content_type}' "$PHOTO_URL")
+check "fetch presigned photo URL" "200 image/jpeg" "$code"
+check "downloaded bytes match upload" "$(wc -c <"$PHOTO" | tr -d ' ')" \
+  "$(wc -c <"$WORK/download" | tr -d ' ')"
+check "other-campus detail -> 404" 404 "$(req GET "$API/incidents/$ID" "$OTHER")"
+check "members as field worker" 200 "$(req GET "$API/members" "$MEENA")"
+jq_ "'     ' + ', '.join(m['name'] + ' (' + m['role'] + ')' for m in d['items'])"
+req GET "$API/incidents/$ID" "$RAVI" >/dev/null
 V=$(jq_ 'd["version"]')
 P=$(printf '{"to":"resolved","note":"cleared silt","expected_version":%s}' "$V")
 check "resolve" 200 "$(req POST "$API/incidents/$ID/transitions" "$RAVI" "$P")"

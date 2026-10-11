@@ -1,6 +1,7 @@
 import threading
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import quote
 
 from botocore.exceptions import ClientError
 
@@ -8,6 +9,7 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": 
 CONTENT_TYPE_FOR_EXT = {ext: ct for ct, ext in ALLOWED_CONTENT_TYPES.items()}
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 UPLOAD_URL_TTL_SECONDS = 300
+DOWNLOAD_URL_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,8 @@ class EvidenceStore(Protocol):
 
     def head(self, key: str) -> StoredObject | None:
         """None when the object does not exist (or is not visible to this role)."""
+
+    def presign_get(self, key: str) -> str: ...
 
 
 def post_conditions(key: str, content_type: str) -> list:
@@ -63,6 +67,13 @@ class S3Store:
             raise
         return StoredObject(int(resp["ContentLength"]), resp.get("ContentType", ""))
 
+    def presign_get(self, key: str) -> str:
+        return self._s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": key},
+            ExpiresIn=DOWNLOAD_URL_TTL_SECONDS,
+        )
+
 
 class StubStore:
     """Local and test store. The local app exposes a POST endpoint that applies the
@@ -70,7 +81,9 @@ class StubStore:
 
     def __init__(self, base_url: str = "http://localhost:8000/_stub-upload") -> None:
         self._base = base_url
+        self._download_base = base_url.removesuffix("/_stub-upload") + "/_stub-download"
         self._objects: dict[str, StoredObject] = {}
+        self._data: dict[str, bytes] = {}
         self._lock = threading.Lock()
 
     def presign_post(self, key: str, content_type: str) -> PresignedPost:
@@ -81,6 +94,14 @@ class StubStore:
     def head(self, key: str) -> StoredObject | None:
         return self._objects.get(key)
 
-    def put(self, key: str, size: int, content_type: str) -> None:
+    def presign_get(self, key: str) -> str:
+        return f"{self._download_base}/{quote(key)}?expires={DOWNLOAD_URL_TTL_SECONDS}"
+
+    def put(self, key: str, size: int, content_type: str, data: bytes = b"") -> None:
         with self._lock:
             self._objects[key] = StoredObject(size, content_type)
+            self._data[key] = data
+
+    def read(self, key: str) -> tuple[StoredObject, bytes] | None:
+        obj = self._objects.get(key)
+        return (obj, self._data.get(key, b"")) if obj else None

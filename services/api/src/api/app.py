@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api import logs
@@ -27,7 +27,12 @@ from api.settings import Settings
 from auth.identity import resolve_actor
 from domain.errors import BadRequest, DomainError
 from domain.model import Actor, IncidentType, Severity, Status
-from repo.storage import ALLOWED_CONTENT_TYPES, MAX_UPLOAD_BYTES, StubStore
+from repo.storage import (
+    ALLOWED_CONTENT_TYPES,
+    DOWNLOAD_URL_TTL_SECONDS,
+    MAX_UPLOAD_BYTES,
+    StubStore,
+)
 
 IDEM_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 TENANT_RE = r"^[a-z0-9-]{1,64}$"
@@ -163,7 +168,12 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
 
     @v1.get("/incidents/{incident_id}")
     def get_incident(actor: ActorDep, incident_id: IncidentId):
-        return incident_out(service.get(actor, incident_id))
+        incident, urls = service.get_with_evidence_urls(actor, incident_id)
+        out = incident_out(incident)
+        for item in out["evidence"]:
+            item["url"] = urls[item["key"]]
+            item["url_expires_in"] = DOWNLOAD_URL_TTL_SECONDS
+        return out
 
     @v1.post("/incidents/{incident_id}/triage")
     def triage(actor: ActorDep, incident_id: IncidentId, body: TriageIn):
@@ -204,6 +214,15 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
     def workers(actor: ActorDep):
         return {"items": [{"id": m.sub, "name": m.name} for m in service.list_workers(actor)]}
 
+    @v1.get("/members")
+    def members(actor: ActorDep):
+        return {
+            "items": [
+                {"id": m.sub, "name": m.name, "role": str(m.role)}
+                for m in service.list_members(actor)
+            ]
+        }
+
     app.include_router(v1)
 
     if settings.app_env == "local" and isinstance(service.store, StubStore):
@@ -217,9 +236,18 @@ def create_app(service: IncidentService, settings: Settings) -> FastAPI:
                 raise BadRequest("key, Content-Type and file are required")
             if content_type not in ALLOWED_CONTENT_TYPES:
                 raise BadRequest("Content-Type not allowed by policy")
-            size = len(await upload.read())
+            data = await upload.read()
+            size = len(data)
             if not 0 < size <= MAX_UPLOAD_BYTES:
                 raise BadRequest("EntityTooLarge or empty")
-            store.put(key, size, content_type)
+            store.put(key, size, content_type, data)
+
+        @app.get("/_stub-download/{key:path}", include_in_schema=False)
+        def stub_download(key: str):
+            found = store.read(key)
+            if found is None:
+                return Response(status_code=404)
+            obj, data = found
+            return Response(content=data, media_type=obj.content_type)
 
     return app

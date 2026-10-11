@@ -1,4 +1,6 @@
+import io
 import itertools
+import logging
 from datetime import UTC, datetime, timedelta
 
 import boto3
@@ -6,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
+from api import logs
 from api.app import create_app
 from api.service import IncidentService
 from api.settings import Settings
@@ -145,3 +148,14 @@ def incident_in(client, status: str) -> dict:
         inc = step(client, inc, path, headers, **body)
     assert inc["status"] == status
     return inc
+
+
+@pytest.fixture
+def captured():
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logs.JsonFormatter())
+    logs.logger.addHandler(handler)
+    logs.logger.setLevel(logging.INFO)
+    yield stream
+    logs.logger.removeHandler(handler)
